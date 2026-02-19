@@ -40,7 +40,7 @@ pipeline {
           sh '''
             set -eu
 
-            . /home/ubuntu/openrc-jenkins.sh
+            . /home/ubuntu/students-openrc.sh
             openstack token issue >/dev/null
 
             echo "==> Params"
@@ -130,7 +130,7 @@ pipeline {
           sh '''
             set -eu
 
-            . /home/ubuntu/openrc-jenkins.sh
+            . /home/ubuntu/students-openrc.sh
             openstack token issue >/dev/null
 
             echo "Deleting stack: $STACK_NAME"
