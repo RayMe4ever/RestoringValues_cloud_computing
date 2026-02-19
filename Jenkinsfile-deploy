@@ -45,11 +45,11 @@ pipeline {
 
     stage('Upload + install + restart') {
       steps {
-        withCredentials([sshUserPrivateKey(
-          credentialsId: params.SSH_CRED_ID,
-          keyFileVariable: 'SSH_KEY_FILE',
-          usernameVariable: 'SSH_USER'
-        )]) {
+        sshagent(credentials: [params.SSH_CRED_ID]) {
+              withCredentials([sshUserPrivateKey(
+                credentialsId: params.SSH_CRED_ID,
+                usernameVariable: 'SSH_USER'
+              )]) {
           sh '''#!/usr/bin/env bash
             set -euo pipefail
             
