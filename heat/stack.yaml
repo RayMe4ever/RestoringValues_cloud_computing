@@ -1,0 +1,54 @@
+heat_template_version: 2018-08-31
+
+description: "Simple stack: one Nova server in existing network"
+
+parameters:
+  server_name:
+    type: string
+    default: heat-vm-1
+
+  image:
+    type: string
+    default: ununtu-22.04
+
+  flavor:
+    type: string
+    default: m1.small
+
+  net_id:
+    type: string
+    description: Existing network ID (sutdents-net)
+
+  key_name:
+    type: string
+    description: Existing Nova keypair name
+
+  security_group:
+    type: string
+    default: students-general
+    description: Existing security group name
+
+resources:
+  vm:
+    type: OS::Nova::Server
+    properties:
+      name: { get_param: server_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      security_groups:
+        - { get_param: security_group }
+      networks:
+        - network: { get_param: net_id }
+
+outputs:
+  server_id:
+    description: ID of the created server
+    value: { get_resource: vm }
+
+  server_name:
+    value: { get_attr: [vm, name] }
+
+  server_ip:
+    description: First fixed IP
+    value: { get_attr: [vm, first_address] }
