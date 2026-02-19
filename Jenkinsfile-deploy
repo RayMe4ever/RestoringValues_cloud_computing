@@ -55,7 +55,7 @@ pipeline {
             set -euo pipefail
 
             chmod 600 "$SSH_KEY_FILE"
-            SSH_OPTS="-i $SSH_KEY_FILE -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+            SSH_OPTS="-i $SSH_KEY_FILE -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
             WHEEL="$(ls -1 deploy_art/**/dist/*.whl deploy_art/dist/*.whl deploy_art/*.whl 2>/dev/null | head -n 1 || true)"
             TGZ="$(ls -1 deploy_art/app-restoringvalues.tgz 2>/dev/null | head -n 1 || true)"
@@ -76,26 +76,38 @@ pipeline {
 
             REL="/opt/restoringvalues/releases/${BUILD_NUMBER}"
 
+            echo "==> Bootstrap /opt/restoringvalues (sudo)"
+            ssh $SSH_OPTS ${SSH_USER}@${TARGET_HOST} "\
+              sudo -n mkdir -p /opt/restoringvalues/{releases,bin,run} && \
+              sudo -n chown -R ${SSH_USER}:${SSH_USER} /opt/restoringvalues \
+            "
+
             echo "==> Create release dir on server"
-            ssh $SSH_OPTS ${SSH_USER}@${TARGET_HOST} "mkdir -p ${REL}"
+            ssh $SSH_OPTS ${SSH_USER}@${TARGET_HOST} "mkdir -p '${REL}'"
 
             echo "==> Upload wheel + app tgz"
             scp $SSH_OPTS "$WHEEL" ${SSH_USER}@${TARGET_HOST}:"${REL}/"
             scp $SSH_OPTS "$TGZ"   ${SSH_USER}@${TARGET_HOST}:"${REL}/"
 
             echo "==> Point /opt/restoringvalues/current to this release"
-            ssh $SSH_OPTS ${SSH_USER}@${TARGET_HOST} "ln -sfn ${REL} /opt/restoringvalues/current"
+            ssh $SSH_OPTS ${SSH_USER}@${TARGET_HOST} "ln -sfn '${REL}' /opt/restoringvalues/current"
 
             echo "==> Install/update + unpack app + systemd restart"
             ssh $SSH_OPTS ${SSH_USER}@${TARGET_HOST} 'bash -s' <<'REMOTE'
               set -euo pipefail
 
-              # базовая подготовка
-              sudo apt-get update -y >/dev/null 2>&1 || true
-              sudo apt-get install -y python3-venv psmisc >/dev/null 2>&1 || true
+              # важно: чтобы не зависнуть, если sudo с паролем
+              if ! sudo -n true 2>/dev/null; then
+                echo "ERROR: ubuntu must have passwordless sudo on target host" >&2
+                exit 1
+              fi
 
-              sudo mkdir -p /opt/restoringvalues/{releases,bin,run}
-              sudo chown -R ubuntu:ubuntu /opt/restoringvalues
+              # базовая подготовка
+              sudo -n apt-get update -y >/dev/null 2>&1 || true
+              sudo -n apt-get install -y python3-venv psmisc >/dev/null 2>&1 || true
+
+              sudo -n mkdir -p /opt/restoringvalues/{releases,bin,run}
+              sudo -n chown -R ubuntu:ubuntu /opt/restoringvalues
 
               cd /opt/restoringvalues/current
 
@@ -172,7 +184,7 @@ done
 SH
               chmod +x /opt/restoringvalues/bin/stop.sh
 
-              sudo tee /etc/systemd/system/restoringvalues.service >/dev/null <<'UNIT'
+              sudo -n tee /etc/systemd/system/restoringvalues.service >/dev/null <<'UNIT'
 [Unit]
 Description=RestoringValues stack (simulator/reciever/business)
 After=network.target
@@ -190,12 +202,12 @@ RestartSec=2
 WantedBy=multi-user.target
 UNIT
 
-              sudo systemctl daemon-reload
-              sudo systemctl enable restoringvalues.service >/dev/null 2>&1 || true
-              sudo systemctl restart restoringvalues.service
+              sudo -n systemctl daemon-reload
+              sudo -n systemctl enable restoringvalues.service >/dev/null 2>&1 || true
+              sudo -n systemctl restart restoringvalues.service
 
               echo "==> service status"
-              sudo systemctl --no-pager --full status restoringvalues.service || true
+              sudo -n systemctl --no-pager --full status restoringvalues.service || true
 REMOTE
           '''
         }
