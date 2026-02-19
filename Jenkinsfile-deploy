@@ -1,136 +1,91 @@
-pipeline {
-  agent { label 'ia_bakastov_lable' }
+stage('Upload + install + restart') {
+  steps {
+    sshagent(credentials: [params.SSH_CRED_ID]) {
+      withCredentials([sshUserPrivateKey(
+        credentialsId: params.SSH_CRED_ID,
+        usernameVariable: 'SSH_USER'
+      )]) {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
 
-  options {
-    timestamps()
-    timeout(time: 15, unit: 'MINUTES')
-    disableConcurrentBuilds()
-  }
+          # показать, что ключ реально загружен в агент (не критично, но полезно)
+          ssh-add -l || true
 
-  parameters {
-    string(name: 'TARGET_HOST', defaultValue: '192.168.199.117', description: 'Deploy host')
-    string(name: 'BUILD_JOB', defaultValue: 'ia_bakastov_cloud_computing/ia_bakastov_pipline', description: 'L2 job name that produces dist/*.whl and app-restoringvalues.tgz')
-    string(name: 'SSH_CRED_ID', defaultValue: 'ubuntu_agent_ssh_ia_bakastov', description: 'ubuntu_agent_ssh_ia_bakastov')
-  }
+          SSH_OPTS="-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
-  stages {
+          WHEEL="$(ls -1 deploy_art/dist/*.whl deploy_art/*.whl 2>/dev/null | head -n 1 || true)"
+          TGZ="$(ls -1 deploy_art/app-restoringvalues.tgz 2>/dev/null | head -n 1 || true)"
 
-    stage('Fetch artifacts from L2') {
-      steps {
-        script {
-          sh 'rm -rf deploy_art && mkdir -p deploy_art'
+          if [ -z "$WHEEL" ]; then
+            echo "No .whl found in deploy_art. Listing:"
+            find deploy_art -maxdepth 6 -type f -print || true
+            exit 1
+          fi
+          if [ -z "$TGZ" ]; then
+            echo "No app-restoringvalues.tgz found in deploy_art. Listing:"
+            find deploy_art -maxdepth 6 -type f -print || true
+            exit 1
+          fi
 
-          step([
-            $class: 'CopyArtifact',
-            projectName: params.BUILD_JOB,
-            selector: [$class: 'StatusBuildSelector', stable: false],
-            filter: 'dist/*.whl',
-            target: 'deploy_art',
-            fingerprintArtifacts: true
-          ])
+          echo "Using wheel: $WHEEL"
+          echo "Using tgz:   $TGZ"
 
-          step([
-            $class: 'CopyArtifact',
-            projectName: params.BUILD_JOB,
-            selector: [$class: 'StatusBuildSelector', stable: false],
-            filter: 'app-restoringvalues.tgz',
-            target: 'deploy_art',
-            fingerprintArtifacts: true
-          ])
+          REL="/opt/restoringvalues/releases/${BUILD_NUMBER}"
 
-          sh 'find deploy_art -maxdepth 4 -type f -print'
-        }
-      }
-    }
+          echo "==> SSH connectivity check"
+          ssh $SSH_OPTS "${SSH_USER}@${TARGET_HOST}" "echo ok"
 
-    stage('Upload + install + restart') {
-      steps {
-        sshagent(credentials: [params.SSH_CRED_ID]) {
-              withCredentials([sshUserPrivateKey(
-                credentialsId: params.SSH_CRED_ID,
-                usernameVariable: 'SSH_USER'
-              )]) {
-          sh '''#!/usr/bin/env bash
+          echo "==> Create release dir on server"
+          ssh $SSH_OPTS "${SSH_USER}@${TARGET_HOST}" "mkdir -p '${REL}'"
+
+          echo "==> Upload wheel + app tgz"
+          scp $SSH_OPTS "$WHEEL" "${SSH_USER}@${TARGET_HOST}:${REL}/"
+          scp $SSH_OPTS "$TGZ"   "${SSH_USER}@${TARGET_HOST}:${REL}/"
+
+          echo "==> Point current -> this release"
+          ssh $SSH_OPTS "${SSH_USER}@${TARGET_HOST}" "ln -sfn '${REL}' /opt/restoringvalues/current"
+
+          echo "==> Remote install + restart"
+          ssh $SSH_OPTS "${SSH_USER}@${TARGET_HOST}" 'bash -s' <<'REMOTE'
             set -euo pipefail
-            
-            echo "Jenkins key pub:"
-            ssh-keygen -y -f "$SSH_KEY_FILE"
 
-            chmod 600 "$SSH_KEY_FILE"
-            SSH_OPTS="-i $SSH_KEY_FILE -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-            WHEEL="$(ls -1 deploy_art/**/dist/*.whl deploy_art/dist/*.whl deploy_art/*.whl 2>/dev/null | head -n 1 || true)"
-            TGZ="$(ls -1 deploy_art/app-restoringvalues.tgz 2>/dev/null | head -n 1 || true)"
-
-            if [ -z "$WHEEL" ]; then
-              echo "No .whl found in deploy_art. Listing:"
-              find deploy_art -maxdepth 6 -type f -print || true
-              exit 1
-            fi
-            if [ -z "$TGZ" ]; then
-              echo "No app-restoringvalues.tgz found in deploy_art. Listing:"
-              find deploy_art -maxdepth 6 -type f -print || true
+            # важно: чтобы не зависнуть, если sudo с паролем
+            if ! sudo -n true 2>/dev/null; then
+              echo "ERROR: ubuntu must have passwordless sudo on target host" >&2
               exit 1
             fi
 
-            echo "Using wheel: $WHEEL"
-            echo "Using tgz:   $TGZ"
+            sudo -n apt-get update -y >/dev/null 2>&1 || true
+            sudo -n apt-get install -y python3-venv psmisc >/dev/null 2>&1 || true
 
-            REL="/opt/restoringvalues/releases/${BUILD_NUMBER}"
+            sudo -n mkdir -p /opt/restoringvalues/{releases,bin,run}
+            sudo -n chown -R ubuntu:ubuntu /opt/restoringvalues
 
-            echo "==> Create release dir on server"
-            ssh $SSH_OPTS ${SSH_USER}@${TARGET_HOST} "mkdir -p ${REL}"
+            cd /opt/restoringvalues/current
 
-            echo "==> Upload wheel + app tgz"
-            scp $SSH_OPTS "$WHEEL" ${SSH_USER}@${TARGET_HOST}:"${REL}/"
-            scp $SSH_OPTS "$TGZ"   ${SSH_USER}@${TARGET_HOST}:"${REL}/"
+            rm -rf app
+            mkdir -p app
+            TGZ="$(ls -1 app-restoringvalues.tgz | head -n 1)"
+            tar -xzf "$TGZ" -C app
 
-            echo "==> Point /opt/restoringvalues/current to this release"
-            ssh $SSH_OPTS ${SSH_USER}@${TARGET_HOST} "ln -sfn ${REL} /opt/restoringvalues/current"
+            test -f app/Simulator/simulator.py
+            test -f app/Reciever/reciever.py
+            test -f app/Business/business.py
 
-            echo "==> Install/update + unpack app + systemd restart"
-            ssh $SSH_OPTS ${SSH_USER}@${TARGET_HOST} 'bash -s' <<'REMOTE'
-              set -euo pipefail
+            WHEEL="$(ls -1 *.whl | head -n 1)"
+            if [ ! -d /opt/restoringvalues/venv ]; then
+              python3 -m venv /opt/restoringvalues/venv
+            fi
+            . /opt/restoringvalues/venv/bin/activate
+            python -m pip install -U pip
+            python -m pip install --force-reinstall "$WHEEL"
 
-              # базовая подготовка
-              sudo apt-get update -y >/dev/null 2>&1 || true
-              sudo apt-get install -y python3-venv psmisc >/dev/null 2>&1 || true
-
-              sudo mkdir -p /opt/restoringvalues/{releases,bin,run}
-              sudo chown -R ubuntu:ubuntu /opt/restoringvalues
-
-              cd /opt/restoringvalues/current
-
-              # 1) распаковываем исходники приложения
-              rm -rf app
-              mkdir -p app
-              TGZ="$(ls -1 app-restoringvalues.tgz | head -n 1)"
-              tar -xzf "$TGZ" -C app
-
-              # sanity-check: должны существовать файлы модулей
-              test -f app/Simulator/simulator.py
-              test -f app/Reciever/reciever.py
-              test -f app/Business/business.py
-
-              # 2) ставим wheel (зависимости/entrypoints)
-              WHEEL="$(ls -1 *.whl | head -n 1)"
-              if [ ! -d /opt/restoringvalues/venv ]; then
-                python3 -m venv /opt/restoringvalues/venv
-              fi
-              . /opt/restoringvalues/venv/bin/activate
-              python -m pip install -U pip
-              python -m pip install --force-reinstall "$WHEEL"
-
-              # 3) start/stop скрипты: запускаем уже из /opt/restoringvalues/current/app
-              cat >/opt/restoringvalues/bin/start.sh <<'SH'
+            cat >/opt/restoringvalues/bin/start.sh <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-
 cd /opt/restoringvalues/current/app
-
 PY="/opt/restoringvalues/venv/bin/python"
 
-# чистим порты
 for p in 8092 8093 8094 8095; do
   fuser -k ${p}/tcp >/dev/null 2>&1 || true
 done
@@ -150,9 +105,9 @@ start_bg business  "$PY" Business/business.py
 
 wait
 SH
-              chmod +x /opt/restoringvalues/bin/start.sh
+            chmod +x /opt/restoringvalues/bin/start.sh
 
-              cat >/opt/restoringvalues/bin/stop.sh <<'SH'
+            cat >/opt/restoringvalues/bin/stop.sh <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -172,9 +127,9 @@ for p in 8092 8093 8094 8095; do
   fuser -k ${p}/tcp >/dev/null 2>&1 || true
 done
 SH
-              chmod +x /opt/restoringvalues/bin/stop.sh
+            chmod +x /opt/restoringvalues/bin/stop.sh
 
-              sudo tee /etc/systemd/system/restoringvalues.service >/dev/null <<'UNIT'
+            sudo -n tee /etc/systemd/system/restoringvalues.service >/dev/null <<'UNIT'
 [Unit]
 Description=RestoringValues stack (simulator/reciever/business)
 After=network.target
@@ -192,23 +147,14 @@ RestartSec=2
 WantedBy=multi-user.target
 UNIT
 
-              sudo systemctl daemon-reload
-              sudo systemctl enable restoringvalues.service >/dev/null 2>&1 || true
-              sudo systemctl restart restoringvalues.service
+            sudo -n systemctl daemon-reload
+            sudo -n systemctl enable restoringvalues.service >/dev/null 2>&1 || true
+            sudo -n systemctl restart restoringvalues.service
 
-              echo "==> service status"
-              sudo systemctl --no-pager --full status restoringvalues.service || true
+            sudo -n systemctl --no-pager --full status restoringvalues.service || true
 REMOTE
-          '''
-        }
+        '''
       }
-    }
-  }
-
-  post {
-    always {
-      archiveArtifacts artifacts: 'deploy_art/**', allowEmptyArchive: true
-      cleanWs()
     }
   }
 }
