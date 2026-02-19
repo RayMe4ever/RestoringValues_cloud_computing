@@ -60,7 +60,7 @@ pipeline {
               echo "==> ssh-agent keys:"
               ssh-add -l || true
 
-              SSH_OPTS="-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+              SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
               WHEEL="$(ls -1 deploy_art/dist/*.whl deploy_art/*.whl 2>/dev/null | head -n 1 || true)"
               TGZ="$(ls -1 deploy_art/app-restoringvalues.tgz 2>/dev/null | head -n 1 || true)"
