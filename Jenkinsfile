@@ -1,5 +1,5 @@
 pipeline {
-  agent { label 'tool' }
+  agent { label 'ia_bakastov_lable' }
 
   options {
     timestamps()
