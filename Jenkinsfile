@@ -55,7 +55,7 @@ pipeline {
           set -euo pipefail
 
           # 1) Подать OpenStack креды (без этого provider пустой)
-          . /home/ubuntu/openrc-jenkins.sh
+          . /home/ubuntu/students-openrc.sh
 
           # 2) Быстрый smoke-check что токен реально получается
           openstack token issue >/dev/null
@@ -79,7 +79,7 @@ pipeline {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
 
-          . /home/ubuntu/openrc-jenkins.sh
+          . /home/ubuntu/students-openrc.sh
           openstack token issue >/dev/null
 
           terraform apply -auto-approve
@@ -147,7 +147,7 @@ pipeline {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
 
-          . /home/ubuntu/openrc-jenkins.sh
+          . /home/ubuntu/students-openrc.sh
           openstack token issue >/dev/null
 
           if [ -f terraform.rc ]; then
