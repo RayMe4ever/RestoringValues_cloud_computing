@@ -47,14 +47,17 @@ pipeline {
     stage('Upload + install + restart') {
       steps {
         sshagent(credentials: [params.SSH_CRED_ID]) {
-          // берем только username из credential (ключ уже в ssh-agent)
+          // Берём username из credential. ВАЖНО: keyFileVariable обязателен у твоего credentials-binding,
+          // иначе ловишь NPE "key is null". Но ключ как файл мы НЕ используем.
           withCredentials([sshUserPrivateKey(
             credentialsId: params.SSH_CRED_ID,
-            usernameVariable: 'SSH_USER'
+            usernameVariable: 'SSH_USER',
+            keyFileVariable: 'SSH_KEY_FILE'
           )]) {
             sh '''#!/usr/bin/env bash
               set -euo pipefail
 
+              echo "==> ssh-agent keys:"
               ssh-add -l || true
 
               SSH_OPTS="-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
@@ -95,6 +98,7 @@ pipeline {
               ssh $SSH_OPTS "${SSH_USER}@${TARGET_HOST}" 'bash -s' <<'REMOTE'
                 set -euo pipefail
 
+                # чтобы не зависнуть на sudo
                 if ! sudo -n true 2>/dev/null; then
                   echo "ERROR: ubuntu must have passwordless sudo on target host" >&2
                   exit 1
@@ -108,6 +112,7 @@ pipeline {
 
                 cd /opt/restoringvalues/current
 
+                # распаковка приложения
                 rm -rf app
                 mkdir -p app
                 TGZ="$(ls -1 app-restoringvalues.tgz | head -n 1)"
@@ -117,6 +122,7 @@ pipeline {
                 test -f app/Reciever/reciever.py
                 test -f app/Business/business.py
 
+                # установка wheel
                 WHEEL="$(ls -1 *.whl | head -n 1)"
                 if [ ! -d /opt/restoringvalues/venv ]; then
                   python3 -m venv /opt/restoringvalues/venv
@@ -125,9 +131,11 @@ pipeline {
                 python -m pip install -U pip
                 python -m pip install --force-reinstall "$WHEEL"
 
+                # start/stop
                 cat >/opt/restoringvalues/bin/start.sh <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+
 cd /opt/restoringvalues/current/app
 PY="/opt/restoringvalues/venv/bin/python"
 
@@ -196,6 +204,7 @@ UNIT
                 sudo -n systemctl enable restoringvalues.service >/dev/null 2>&1 || true
                 sudo -n systemctl restart restoringvalues.service
 
+                echo "==> service status"
                 sudo -n systemctl --no-pager --full status restoringvalues.service || true
 REMOTE
             '''
