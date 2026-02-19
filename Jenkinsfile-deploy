@@ -8,7 +8,7 @@ pipeline {
   }
 
   parameters {
-    string(name: 'TARGET_HOST', defaultValue: '192.168.199.125', description: 'Deploy host')
+    string(name: 'TARGET_HOST', defaultValue: '192.168.199.117', description: 'Deploy host')
     string(name: 'BUILD_JOB', defaultValue: 'ia_bakastov_cloud_computing/ia_bakastov_pipline', description: 'L2 job name that produces dist/*.whl and app-restoringvalues.tgz')
     string(name: 'SSH_CRED_ID', defaultValue: 'ubuntu_agent_ssh_ia_bakastov', description: 'ubuntu_agent_ssh_ia_bakastov')
   }
