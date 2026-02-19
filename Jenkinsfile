@@ -1,5 +1,5 @@
 pipeline {
-  agent { label 'tool' }
+  agent { label 'ia_bakastov_lable' }
 
   parameters {
     choice(name: 'ACTION', choices: ['create_or_update', 'delete'], description: 'Действие со стеком')
