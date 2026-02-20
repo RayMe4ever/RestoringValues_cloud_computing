@@ -1,5 +1,5 @@
 pipeline {
-  agent { label 'ia_bakastov_label' }
+  agent { label 'ia_bakastov_lable' }
 
   environment {
     PYTHONNOUSERSITE = "1"
