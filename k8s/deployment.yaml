@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: restoringvalues
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: restoringvalues
+  template:
+    metadata:
+      labels:
+        app: restoringvalues
+    spec:
+      containers:
+        - name: restoringvalues
+          image: cr.yandex/<REGISTRY_ID>/restoringvalues:latest
+          imagePullPolicy: Always
+          ports:
+            - name: sim
+              containerPort: 8092
+            - name: rec
+              containerPort: 8093
+            - name: bus
+              containerPort: 8094
+            - name: extra
+              containerPort: 8095
