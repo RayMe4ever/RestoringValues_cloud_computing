@@ -3,7 +3,7 @@ pipeline {
 
   environment {
     PYTHONNOUSERSITE = "1"
-    NAMESPACE        = "ia-bakastov-reg"
+    NAMESPACE        = "ia-bakastov-nms"
     REGISTRY_ID      = "crp9gbl4bna1t355qco6"
     IMAGE            = "cr.yandex/${REGISTRY_ID}/restoringvalues:latest"
   }
