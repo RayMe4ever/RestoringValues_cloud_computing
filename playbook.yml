@@ -26,11 +26,31 @@
         msg: "app_tgz_path is empty. Jenkins must pass --extra-vars app_tgz_path=..."
       when: app_tgz_path | length == 0
 
+    # --- FIX: лечим broken packages/рассинхрон реп ---
+    - name: Apt update cache
+      apt:
+        update_cache: yes
+
+    - name: Fix broken packages (best effort)
+      shell: |
+        set -e
+        apt-get -y --fix-broken install
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Dist upgrade (best effort)
+      apt:
+        upgrade: dist
+      failed_when: false
+
+    # --- FIX: ставим версионный venv пакет для Ubuntu 22.04 ---
     - name: Install required system packages
       apt:
         update_cache: yes
         name:
-          - python3-venv
+          - python3.10-venv
           - psmisc
           - tar
         state: present
@@ -117,7 +137,6 @@
           #!/usr/bin/env bash
           set -euo pipefail
 
-          # всегда из app
           cd "{{ current_dir }}/app"
 
           for p in 8092 8093 8094 8095; do
@@ -198,7 +217,3 @@
 
     - name: Show service status
       shell: "systemctl --no-pager --full status {{ service_name }}.service || true"
-      register: status_out
-
-    - debug:
-        var: status_out.stdout_lines
